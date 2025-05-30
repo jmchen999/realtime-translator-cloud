@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>🎧 錄音後翻譯字幕工具</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; text-align: center; padding: 40px; background-color: #f4f4f4; }
+    button { padding: 12px 24px; font-size: 16px; margin: 10px; border: none; border-radius: 6px; cursor: pointer; }
+    #output { margin-top: 30px; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 0 8px rgba(0,0,0,0.1); font-size: 1.4em; min-height: 100px; }
+    #start { background-color: #28a745; color: white; }
+    #stop { background-color: #ffc107; color: black; }
+    #submit { background-color: #007bff; color: white; }
+    #error { color: red; font-weight: bold; }
+  </style>
+</head>
+<body>
+  {% set _ = request %}
+  <h2>🎧 錄音後翻譯字幕工具</h2>
+  <button id="start">開始錄音</button>
+  <button id="stop" disabled>停止錄音</button>
+  <button id="submit" disabled>送出翻譯</button>
+  <div id="output">尚未翻譯任何內容...</div>
+  <div id="error"></div>
+
+  <script>
+    let mediaRecorder;
+    let audioBlob;
+
+    const startBtn = document.getElementById("start");
+    const stopBtn = document.getElementById("stop");
+    const submitBtn = document.getElementById("submit");
+    const output = document.getElementById("output");
+    const errorBox = document.getElementById("error");
+
+    const showError = (msg) => {
+      errorBox.innerText = msg;
+      console.error("❗ 錯誤：", msg);
+    };
+
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      showError("您的瀏覽器不支援錄音功能");
+      startBtn.disabled = true;
+    }
+
+    startBtn.onclick = async () => {
+      errorBox.innerText = "";
+      if (!MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+        showError("您的裝置不支援 WebM 錄音格式，請使用 Chrome 或 Android 裝置");
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        mediaRecorder = new MediaRecorder(stream, {
+          mimeType: "audio/webm;codecs=opus"
+        });
+
+        const chunks = [];
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          if (chunks.length === 0) {
+            showError("未錄到任何聲音");
+            return;
+          }
+
+          audioBlob = new Blob(chunks, { type: "audio/webm" });
+          if (audioBlob.size < 3000) {
+            showError("錄音內容太少，請再試一次");
+            return;
+          }
+
+          output.innerText = "✅ 錄音完成，請送出翻譯";
+          submitBtn.disabled = false;
+        };
+
+        mediaRecorder.start();
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        output.innerText = "🎙️ 錄音中...";
+      } catch (err) {
+        showError("錄音啟動失敗：" + err.message);
+      }
+    };
+
+    stopBtn.onclick = () => {
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+    };
+
+    submitBtn.onclick = async () => {
+      if (!audioBlob) return showError("無有效錄音檔，請重新錄音");
+
+      output.innerText = "⏳ 翻譯中...";
+      errorBox.innerText = "";
+      const formData = new FormData();
+      formData.append("file", audioBlob, "recording.webm");
+
+      try {
+        const res1 = await fetch("/transcribe", { method: "POST", body: formData });
+        const res1Json = await res1.json();
+        const englishText = res1Json.text || "";
+
+        const res2 = await fetch("/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ text: englishText }),
+        });
+        const res2Json = await res2.json();
+        output.innerText = res2Json.translation || "[翻譯失敗]";
+      } catch (err) {
+        showError("翻譯錯誤：" + err.message);
+        output.innerText = "[系統錯誤]";
+      }
+    };
+  </script>
+</body>
+</html>

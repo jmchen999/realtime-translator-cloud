@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: realtime-translator-cloud
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:10000
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
